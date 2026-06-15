@@ -36,21 +36,26 @@ def summarize(menus_text):
     today = datetime.date.today()
     weekday = today.strftime("%A")
     date_str = today.strftime("%Y-%m-%d")
-    response = client.models.generate_content(
-        model="gemini-3.5-flash",
-        contents=(
-            f"Today is {weekday}, {date_str}. "
-            "The following pages contain lunch menus, often listing all 5 weekdays. "
-            f"Extract ONLY today's ({weekday}) menu for each restaurant. "
-            "Output a clean summary grouped by restaurant name. "
-            "Include dish names and prices if available. "
-            "Dish names should be noted in Swedish if they are written as Swedish in the webpage, otherwise put in English. "
-            "Add Chinese translation in parenthesis after each dish name. "
-            "If a restaurant failed to load or today's menu is not found, note it briefly.\n\n"
-            f"{menus_text}"
-        ),
+    prompt = (
+        f"Today is {weekday}, {date_str}. "
+        "The following pages contain lunch menus, often listing all 5 weekdays. "
+        f"Extract ONLY today's ({weekday}) menu for each restaurant. "
+        "Output a clean summary grouped by restaurant name. "
+        "Include dish names and prices if available. "
+        "Dish names should be noted in Swedish if they are written as Swedish in the webpage, otherwise put in English. "
+        "Add Chinese translation in parenthesis after each dish name. "
+        "If a restaurant failed to load or today's menu is not found, note it briefly.\n\n"
+        f"{menus_text}"
     )
-    return response.text
+    models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3-flash-preview"]
+    for model in models:
+        try:
+            response = client.models.generate_content(model=model, contents=prompt)
+            print(f"Used model: {model}")
+            return response.text
+        except Exception as e:
+            print(f"Model {model} failed: {e}")
+    raise RuntimeError("All models failed")
 
 
 def send_webhook(text):
