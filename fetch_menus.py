@@ -11,8 +11,7 @@ RESTAURANTS = [
     "https://www.kvartersmenyn.se/index.php/rest/16966",
     "https://www.compass-group.se/restauranger-och-menyer/foodandco/food--co-timebuilding/",
     "https://www.compass-group.se/restauranger-och-menyer/foodandco/kista/",
-    "https://www.heatrestauranger.se/lunch-heat-stockholm-kista/#veckans-lunchmeny",
-    "https://brams.se/menu",
+
     "https://ericssonbynordrest.se/restaurang/the-courtyard/#lunch-menu",
 ]
 
@@ -57,7 +56,9 @@ def summarize(menus_text):
 def send_webhook(text):
     if not WEBHOOK_URL:
         return
-    requests.post(WEBHOOK_URL, json={"text": text}, timeout=10)
+    # Discord limits messages to 2000 chars
+    for i in range(0, len(text), 2000):
+        requests.post(WEBHOOK_URL, json={"content": text[i:i+2000]}, timeout=10)
 
 
 def main():
