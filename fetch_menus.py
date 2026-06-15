@@ -16,6 +16,52 @@ RESTAURANTS = [
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 USER_AGENT = "Mozilla/5.0"
+DEBUG = os.environ.get("DEBUG", "0") == "1"
+
+
+def easter(year):
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month, day = divmod(h + l - 7 * m + 114, 31)
+    return datetime.date(year, month, day + 1)
+
+
+def swedish_holidays(year):
+    e = easter(year)
+    midsommarafton = next(datetime.date(year, 6, x) for x in range(19, 26) if datetime.date(year, 6, x).weekday() == 4)
+    return {
+        datetime.date(year, 1, 1): "Nyårsdagen",
+        datetime.date(year, 1, 6): "Trettondedag jul",
+        e - datetime.timedelta(days=2): "Långfredagen",
+        e: "Påskdagen",
+        e + datetime.timedelta(days=1): "Annandag påsk",
+        datetime.date(year, 5, 1): "Första maj",
+        e + datetime.timedelta(days=39): "Kristi himmelsfärdsdag",
+        datetime.date(year, 6, 6): "Nationaldagen",
+        e + datetime.timedelta(days=49): "Pingstdagen",
+        midsommarafton: "Midsommarafton",
+        midsommarafton + datetime.timedelta(days=1): "Midsommardagen",
+        datetime.date(year, 12, 24): "Julafton",
+        datetime.date(year, 12, 25): "Juldagen",
+        datetime.date(year, 12, 26): "Annandag jul",
+        datetime.date(year, 12, 31): "Nyårsafton",
+    }
+
+
+def is_swedish_holiday(d):
+    holidays = swedish_holidays(d.year)
+    if DEBUG:
+        print("Swedish holidays this year:")
+        for date, name in sorted(holidays.items()):
+            print(f"  {date} - {name}")
+    return holidays.get(d)
 
 
 def fetch_menu(url):
@@ -67,6 +113,13 @@ def send_webhook(text):
 
 def main():
     today = datetime.date.today()
+    if today.month == 7:
+        print("July - skipping (summer break)")
+        return
+    holiday = is_swedish_holiday(today)
+    if holiday:
+        print(f"Today is {holiday} - skipping")
+        return
     print(f"Fetching lunch menus for Kista - {today.strftime('%A %Y-%m-%d')}\n")
     menus = [fetch_menu(url) for url in RESTAURANTS]
     combined = "\n\n".join(menus)
