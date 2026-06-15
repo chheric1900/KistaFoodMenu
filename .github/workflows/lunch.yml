@@ -20,6 +20,6 @@ jobs:
 
       - name: Fetch and summarize menus
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_PROJECT_KISTA_FOOD_MENU_FREE_TIER_API_KEY }}
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL_FOR_KISTA_FOOD_MENU }}
         run: python fetch_menus.py
