@@ -38,7 +38,7 @@ def summarize(menus_text):
     weekday = today.strftime("%A")
     date_str = today.strftime("%Y-%m-%d")
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-3.5-flash",
         contents=(
             f"Today is {weekday}, {date_str}. "
             "The following pages contain lunch menus, often listing all 5 weekdays. "
