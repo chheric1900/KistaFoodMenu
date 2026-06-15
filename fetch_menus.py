@@ -5,22 +5,22 @@ import datetime
 import os
 
 RESTAURANTS = [
-    "https://www.kvartersmenyn.se/index.php/rest/16302",
+    "https://ericssonbynordrest.se/restaurang/the-courtyard/#lunch-menu",
+    "https://www.compass-group.se/restauranger-och-menyer/foodandco/kista/",
+    "https://www.compass-group.se/restauranger-och-menyer/foodandco/food--co-timebuilding/",
     "https://restaurang88.se/LunchBuffet.html",
+    "https://www.kvartersmenyn.se/index.php/rest/16302",
     "https://www.kvartersmenyn.se/index.php/rest/9464",
     "https://www.kvartersmenyn.se/index.php/rest/16966",
-    "https://www.compass-group.se/restauranger-och-menyer/foodandco/food--co-timebuilding/",
-    "https://www.compass-group.se/restauranger-och-menyer/foodandco/kista/",
-
-    "https://ericssonbynordrest.se/restaurang/the-courtyard/#lunch-menu",
 ]
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+USER_AGENT = "Mozilla/5.0"
 
 
 def fetch_menu(url):
     try:
-        resp = requests.get(url, timeout=10, headers={"User-Agent": "KistaLunchBot/1.0"})
+        resp = requests.get(url, timeout=10, headers={"User-Agent": USER_AGENT})
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         for tag in soup(["script", "style", "nav", "footer", "header"]):
@@ -40,7 +40,7 @@ def summarize(menus_text):
         f"Today is {weekday}, {date_str}. "
         "The following pages contain lunch menus, often listing all 5 weekdays. "
         f"Extract ONLY today's ({weekday}) menu for each restaurant. "
-        "Output a clean summary grouped by restaurant name. "
+        "Output the summary in the following order: The Courtyard first, then Food & Co Kista, then the rest. "
         "Include dish names and prices if available. "
         "Dish names should be noted in Swedish if they are written as Swedish in the webpage, otherwise put in English. "
         "Add Chinese translation in parenthesis after each dish name. "
@@ -61,7 +61,6 @@ def summarize(menus_text):
 def send_webhook(text):
     if not WEBHOOK_URL:
         return
-    # Discord limits messages to 2000 chars
     for i in range(0, len(text), 2000):
         requests.post(WEBHOOK_URL, json={"content": text[i:i+2000]}, timeout=10)
 
