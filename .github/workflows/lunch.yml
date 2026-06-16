@@ -2,7 +2,7 @@ name: Kista Lunch Menu Summary
 
 on:
   schedule:
-    - cron: '0 8 * * 1-5'
+    - cron: '0 6 * * 1-5'
   workflow_dispatch:
 
 jobs:
