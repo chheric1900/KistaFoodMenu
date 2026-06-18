@@ -89,7 +89,7 @@ def summarize(menus_text):
         "Output the summary in the following order: The Courtyard first, then Food & Co Kista, then the rest. "
         "Include dish names and prices if available. "
         "Dish names should be noted in Swedish if they are written as Swedish in the webpage, otherwise put in English. "
-        "Add Chinese translation in parenthesis after each dish name. "
+        "Add Chinese translation (中文翻译) in parenthesis after each dish name. For example: 'Köttbullar (瑞典肉丸)'. Every single dish must have a Chinese translation. "
         "If a restaurant failed to load or today's menu is not found, note it briefly.\n\n"
         f"{menus_text}"
     )
