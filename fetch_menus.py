@@ -57,6 +57,10 @@ def swedish_holidays(year):
 
 def is_swedish_holiday(d):
     holidays = swedish_holidays(d.year)
+    # Bridge day: Friday after Kristi himmelsfärdsdag (always a Thursday)
+    e = easter(d.year)
+    kristi = e + datetime.timedelta(days=39)
+    holidays[kristi + datetime.timedelta(days=1)] = "Klämdag (after Kristi himmelsfärdsdag)"
     if DEBUG:
         print("Swedish holidays this year:")
         for date, name in sorted(holidays.items()):
