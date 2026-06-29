@@ -92,8 +92,7 @@ def summarize(menus_text):
         f"Extract ONLY today's ({weekday}) menu for each restaurant. "
         "Output the summary in the following order: The Courtyard first, then Food & Co Kista, then the rest. "
         "Include dish names and prices if available. "
-        "Dish names should be noted in Swedish if they are written as Swedish in the webpage, otherwise put in English. "
-        "Add Chinese translation (中文翻译) in parenthesis after each dish name. For example: 'Köttbullar (瑞典肉丸)'. Every single dish must have a Chinese translation. "
+        "Dish names should be in Chinese first, followed by the original Swedish or English name in parenthesis. For example: '瑞典肉丸 (Köttbullar)'. Every single dish must follow this format. "
         "If a restaurant failed to load or today's menu is not found, note it briefly.\n\n"
         f"{menus_text}"
     )
@@ -102,6 +101,18 @@ def summarize(menus_text):
         try:
             response = client.models.generate_content(model=model, contents=prompt)
             print(f"Used model: {model}")
+            # Token usage logging
+            if response.usage_metadata:
+                um = response.usage_metadata
+                print(f"--- Token Usage ---")
+                print(f"  Input tokens:    {um.prompt_token_count}")
+                print(f"  Output tokens:   {um.candidates_token_count}")
+                print(f"  Total tokens:    {um.total_token_count}")
+                if hasattr(um, 'thoughts_token_count') and um.thoughts_token_count:
+                    print(f"  Thinking tokens: {um.thoughts_token_count}")
+                # Print all fields for discovery
+                if DEBUG:
+                    print(f"  [DEBUG] Full usage_metadata: {um}")
             return response.text
         except Exception as e:
             print(f"Model {model} failed: {e}")
