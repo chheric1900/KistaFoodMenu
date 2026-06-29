@@ -91,10 +91,11 @@ def summarize(menus_text):
         "The following pages contain lunch menus, often listing all 5 weekdays. "
         f"Extract ONLY today's ({weekday}) menu for each restaurant. "
         "Output the summary in the following order: The Courtyard first, then Food & Co Kista, then the rest. "
-        "Include dish names and prices if available. "
-        "Dish names should be in Chinese first, followed by the original Swedish or English name in parenthesis. For example: '瑞典肉丸 (Köttbullar)'. Every single dish must follow this format. "
-        "If a restaurant failed to load or today's menu is not found, note it briefly.\n\n"
-        f"{menus_text}"
+        "If a restaurant's menu is not for today, or the restaurant is closed/on holiday, note it briefly and do NOT output old menus from other days. "
+        "Include prices if available.\n\n"
+        f"{menus_text}\n\n"
+        "IMPORTANT FORMAT RULE: Every dish name MUST be written in Chinese first, followed by the original Swedish or English name in parenthesis. "
+        "Example: '瑞典肉丸 (Köttbullar)', '烤三文鱼 (Grillad lax)'. NO exceptions. Do NOT put Swedish/English first."
     )
     models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3-flash-preview"]
     for model in models:
