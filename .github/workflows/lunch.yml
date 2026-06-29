@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 4 * * 1-5'
   workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Debug mode (skip webhook, log only)'
+        type: boolean
+        default: false
 
 jobs:
   fetch-and-summarize:
@@ -22,4 +27,5 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_PROJECT_KISTA_FOOD_MENU_FREE_TIER_API_KEY }}
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL_FOR_KISTA_FOOD_MENU }}
+          DEBUG: ${{ inputs.debug && '1' || '0' }}
         run: python fetch_menus.py

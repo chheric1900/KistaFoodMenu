@@ -104,22 +104,27 @@ def summarize(menus_text):
             # Token usage logging
             if response.usage_metadata:
                 um = response.usage_metadata
-                print(f"--- Token Usage ---")
-                print(f"  Input tokens:    {um.prompt_token_count}")
-                print(f"  Output tokens:   {um.candidates_token_count}")
-                print(f"  Total tokens:    {um.total_token_count}")
+                usage_str = (
+                    f"\n--- Token Usage ---\n"
+                    f"  Input: {um.prompt_token_count} | Output: {um.candidates_token_count} | Total: {um.total_token_count}"
+                )
                 if hasattr(um, 'thoughts_token_count') and um.thoughts_token_count:
-                    print(f"  Thinking tokens: {um.thoughts_token_count}")
-                # Print all fields for discovery
+                    usage_str += f" | Thinking: {um.thoughts_token_count}"
+                print(usage_str)
                 if DEBUG:
                     print(f"  [DEBUG] Full usage_metadata: {um}")
-            return response.text
+            else:
+                usage_str = ""
+            return response.text, usage_str
         except Exception as e:
             print(f"Model {model} failed: {e}")
     raise RuntimeError("All models failed")
 
 
 def send_webhook(text):
+    if DEBUG:
+        print("[DEBUG] Skipping webhook")
+        return
     if not WEBHOOK_URL:
         return
     for i in range(0, len(text), 2000):
@@ -138,9 +143,9 @@ def main():
     print(f"Fetching lunch menus for Kista - {today.strftime('%A %Y-%m-%d')}\n")
     menus = [fetch_menu(url) for url in RESTAURANTS]
     combined = "\n\n".join(menus)
-    summary = summarize(combined)
+    summary, usage_str = summarize(combined)
     print(summary)
-    send_webhook(summary)
+    send_webhook(summary + usage_str)
 
 
 if __name__ == "__main__":
