@@ -194,6 +194,11 @@ def summarize(fetched_results):
         "   信息不可用: YYY餐厅 (Response code: ZZZ)\n"
     )
 
+    if DEBUG:
+        print("--- [DEBUG] Full prompt to AI ---")
+        print(prompt)
+        print("--- [DEBUG] End of prompt ---\n")
+
     models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3-flash-preview"]
     tried_models = []
     for model in models:
