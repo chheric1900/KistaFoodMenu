@@ -73,7 +73,10 @@ def is_swedish_holiday(d):
 
 def load_token_usage():
     if not os.path.exists(TOKEN_USAGE_FILE):
-        return {"history": [], "total_input": 0, "total_output": 0, "total_thinking": 0}
+        return {
+            "scheduled": {"history": [], "total_input": 0, "total_output": 0, "total_thinking": 0},
+            "debug": {"history": [], "total_input": 0, "total_output": 0, "total_thinking": 0},
+        }
     with open(TOKEN_USAGE_FILE, "r") as f:
         return json.load(f)
 
@@ -86,22 +89,23 @@ def save_token_usage(data):
 def update_token_usage(input_tokens, output_tokens, thinking_tokens=0):
     data = load_token_usage()
     today_str = datetime.date.today().strftime("%Y-%m-%d")
-    data["history"].append({
+    run_type = "debug" if DEBUG else "scheduled"
+    data[run_type]["history"].append({
         "date": today_str,
         "input": input_tokens,
         "output": output_tokens,
         "thinking": thinking_tokens,
     })
-    data["total_input"] += input_tokens
-    data["total_output"] += output_tokens
-    data["total_thinking"] += thinking_tokens
+    data[run_type]["total_input"] += input_tokens
+    data[run_type]["total_output"] += output_tokens
+    data[run_type]["total_thinking"] += thinking_tokens
     save_token_usage(data)
     return data
 
 
-def get_30day_usage(data):
+def get_30day_usage(data, run_type):
     cutoff = (datetime.date.today() - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
-    recent = [e for e in data["history"] if e["date"] >= cutoff]
+    recent = [e for e in data[run_type]["history"] if e["date"] >= cutoff]
     return {
         "input": sum(e["input"] for e in recent),
         "output": sum(e["output"] for e in recent),
@@ -109,11 +113,12 @@ def get_30day_usage(data):
     }
 
 
-def format_token_usage(um, data):
+def format_token_usage(um, data, model_path):
     input_t = um.prompt_token_count or 0
     output_t = um.candidates_token_count or 0
     thinking_t = getattr(um, 'thoughts_token_count', 0) or 0
-    usage_30d = get_30day_usage(data)
+    run_type = "debug" if DEBUG else "scheduled"
+    usage_30d = get_30day_usage(data, run_type)
     lines = [
         "--- Token Usage ---",
         f"  Input:    {input_t} tokens",
@@ -122,8 +127,9 @@ def format_token_usage(um, data):
     if thinking_t:
         lines.append(f"  Thinking: {thinking_t} tokens")
     lines.append(f"  Total:    {input_t + output_t + thinking_t} tokens")
-    lines.append(f"  30-day:   input {usage_30d['input']} | output {usage_30d['output']} | thinking {usage_30d['thinking']}")
-    lines.append(f"  All-time: input {data['total_input']} | output {data['total_output']} | thinking {data['total_thinking']}")
+    lines.append(f"  [Scheduled] 30-day: in {get_30day_usage(data, 'scheduled')['input']} | out {get_30day_usage(data, 'scheduled')['output']} | think {get_30day_usage(data, 'scheduled')['thinking']} | all-time: in {data['scheduled']['total_input']} | out {data['scheduled']['total_output']} | think {data['scheduled']['total_thinking']}")
+    lines.append(f"  [Debug]     30-day: in {get_30day_usage(data, 'debug')['input']} | out {get_30day_usage(data, 'debug')['output']} | think {get_30day_usage(data, 'debug')['thinking']} | all-time: in {data['debug']['total_input']} | out {data['debug']['total_output']} | think {data['debug']['total_thinking']}")
+    lines.append(f"  Model: {model_path}")
     return "\n".join(lines)
 
 
@@ -189,10 +195,13 @@ def summarize(fetched_results):
     )
 
     models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3-flash-preview"]
+    tried_models = []
     for model in models:
+        tried_models.append(model)
         try:
             response = client.models.generate_content(model=model, contents=prompt)
-            print(f"Used model: {model}")
+            model_path = " → ".join(tried_models) + (" (fallback)" if len(tried_models) > 1 else "")
+            print(f"Used model: {model_path}")
 
             # Token usage
             usage_str = ""
@@ -202,7 +211,7 @@ def summarize(fetched_results):
                 output_t = um.candidates_token_count or 0
                 thinking_t = getattr(um, 'thoughts_token_count', 0) or 0
                 data = update_token_usage(input_t, output_t, thinking_t)
-                usage_str = "\n" + format_token_usage(um, data)
+                usage_str = "\n" + format_token_usage(um, data, model_path)
                 print(usage_str)
                 if DEBUG:
                     print(f"  [DEBUG] Full usage_metadata: {um}")
