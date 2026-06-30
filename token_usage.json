@@ -1,0 +1,13 @@
+{
+  "history": [
+    {
+      "date": "2026-06-30",
+      "input": 2587,
+      "output": 422,
+      "thinking": 3507
+    }
+  ],
+  "total_input": 2587,
+  "total_output": 422,
+  "total_thinking": 3507
+}
