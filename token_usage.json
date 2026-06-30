@@ -1,13 +1,28 @@
 {
-  "history": [
-    {
-      "date": "2026-06-30",
-      "input": 2587,
-      "output": 422,
-      "thinking": 3507
-    }
-  ],
-  "total_input": 2587,
-  "total_output": 422,
-  "total_thinking": 3507
+  "scheduled": {
+    "history": [
+      {
+        "date": "2026-06-30",
+        "input": 2587,
+        "output": 422,
+        "thinking": 3507
+      }
+    ],
+    "total_input": 2587,
+    "total_output": 422,
+    "total_thinking": 3507
+  },
+  "debug": {
+    "history": [
+      {
+        "date": "2026-06-30",
+        "input": 4109,
+        "output": 455,
+        "thinking": 4310
+      }
+    ],
+    "total_input": 4109,
+    "total_output": 455,
+    "total_thinking": 4310
+  }
 }
