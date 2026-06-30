@@ -2,6 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 from google import genai
 import datetime
+import json
 import os
 
 RESTAURANTS = [
@@ -17,6 +18,7 @@ RESTAURANTS = [
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 USER_AGENT = "Mozilla/5.0"
 DEBUG = os.environ.get("DEBUG", "0") == "1"
+TOKEN_USAGE_FILE = os.path.join(os.path.dirname(__file__), "token_usage.json")
 
 
 def easter(year):
@@ -57,7 +59,6 @@ def swedish_holidays(year):
 
 def is_swedish_holiday(d):
     holidays = swedish_holidays(d.year)
-    # Bridge day: Friday after Kristi himmelsfärdsdag (always a Thursday)
     e = easter(d.year)
     kristi = e + datetime.timedelta(days=39)
     holidays[kristi + datetime.timedelta(days=1)] = "Klämdag (after Kristi himmelsfärdsdag)"
@@ -68,6 +69,66 @@ def is_swedish_holiday(d):
     return holidays.get(d)
 
 
+# --- Token usage tracking ---
+
+def load_token_usage():
+    if not os.path.exists(TOKEN_USAGE_FILE):
+        return {"history": [], "total_input": 0, "total_output": 0, "total_thinking": 0}
+    with open(TOKEN_USAGE_FILE, "r") as f:
+        return json.load(f)
+
+
+def save_token_usage(data):
+    with open(TOKEN_USAGE_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def update_token_usage(input_tokens, output_tokens, thinking_tokens=0):
+    data = load_token_usage()
+    today_str = datetime.date.today().strftime("%Y-%m-%d")
+    data["history"].append({
+        "date": today_str,
+        "input": input_tokens,
+        "output": output_tokens,
+        "thinking": thinking_tokens,
+    })
+    data["total_input"] += input_tokens
+    data["total_output"] += output_tokens
+    data["total_thinking"] += thinking_tokens
+    save_token_usage(data)
+    return data
+
+
+def get_30day_usage(data):
+    cutoff = (datetime.date.today() - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+    recent = [e for e in data["history"] if e["date"] >= cutoff]
+    return {
+        "input": sum(e["input"] for e in recent),
+        "output": sum(e["output"] for e in recent),
+        "thinking": sum(e["thinking"] for e in recent),
+    }
+
+
+def format_token_usage(um, data):
+    input_t = um.prompt_token_count or 0
+    output_t = um.candidates_token_count or 0
+    thinking_t = getattr(um, 'thoughts_token_count', 0) or 0
+    usage_30d = get_30day_usage(data)
+    lines = [
+        "--- Token Usage ---",
+        f"  Input:    {input_t} tokens",
+        f"  Output:   {output_t} tokens",
+    ]
+    if thinking_t:
+        lines.append(f"  Thinking: {thinking_t} tokens")
+    lines.append(f"  Total:    {input_t + output_t + thinking_t} tokens")
+    lines.append(f"  30-day:   input {usage_30d['input']} | output {usage_30d['output']} | thinking {usage_30d['thinking']}")
+    lines.append(f"  All-time: input {data['total_input']} | output {data['total_output']} | thinking {data['total_thinking']}")
+    return "\n".join(lines)
+
+
+# --- Fetch ---
+
 def fetch_menu(url):
     try:
         resp = requests.get(url, timeout=10, headers={"User-Agent": USER_AGENT})
@@ -76,51 +137,82 @@ def fetch_menu(url):
         for tag in soup(["script", "style", "nav", "footer", "header"]):
             tag.decompose()
         text = soup.get_text(separator="\n", strip=True)
-        return f"=== {url} ===\n{text[:3000]}"
+        return {"url": url, "status": "ok", "content": text[:3000]}
+    except requests.exceptions.HTTPError as e:
+        return {"url": url, "status": "error", "code": e.response.status_code if e.response else 0}
     except Exception as e:
-        return f"=== {url} ===\n[Failed to fetch: {e}]"
+        return {"url": url, "status": "error", "code": str(e)}
 
 
-def summarize(menus_text):
+# --- AI ---
+
+def summarize(fetched_results):
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     today = datetime.date.today()
     weekday = today.strftime("%A")
     date_str = today.strftime("%Y-%m-%d")
+
+    # Separate successful fetches from failures
+    ok_menus = [r for r in fetched_results if r["status"] == "ok"]
+    failed = [r for r in fetched_results if r["status"] == "error"]
+
+    menus_text = "\n\n".join(f"=== {r['url']} ===\n{r['content']}" for r in ok_menus)
+
     prompt = (
         f"Today is {weekday}, {date_str}. "
         "The following pages contain lunch menus, often listing all 5 weekdays. "
         f"Extract ONLY today's ({weekday}) menu for each restaurant. "
-        "Output the summary in the following order: The Courtyard first, then Food & Co Kista, then the rest. "
-        "If a restaurant's menu is not for today, or the restaurant is closed/on holiday, note it briefly and do NOT output old menus from other days. "
+        "Output the summary in the following order: The Courtyard/The Bistro first, then Food & Co Kista, then the rest. "
+        "NOTE: The URL 'ericssonbynordrest.se/restaurang/the-courtyard' may serve as 'The Bistro' during summer instead of 'The Courtyard'. "
+        "Check the page content to determine which restaurant name is currently active and use that name in the output. "
+        "If a restaurant's menu is not for today, or the restaurant is closed/on holiday, "
+        "put it in a section called '餐厅关闭或信息不可用' with format: '关闭: 餐厅名 (从 X月X日 到 Y月Y日)' or '信息不可用: 餐厅名'. "
         "Include prices if available.\n\n"
         f"{menus_text}\n\n"
-        "IMPORTANT FORMAT RULE: Every dish name MUST be written in Chinese first, followed by the original Swedish or English name in parenthesis. "
-        "Example: '瑞典肉丸 (Köttbullar)', '烤三文鱼 (Grillad lax)'. NO exceptions. Do NOT put Swedish/English first."
     )
+
+    # Add failed restaurants info for AI
+    if failed:
+        prompt += "以下餐厅网页无法访问:\n"
+        for r in failed:
+            prompt += f"  - {r['url']} (Response code: {r['code']})\n"
+        prompt += "\n"
+
+    prompt += (
+        "IMPORTANT FORMAT RULES:\n"
+        "1. Every dish name MUST be written in Chinese first, followed by the original Swedish or English name in parenthesis. "
+        "Example: '瑞典肉丸 (Köttbullar)', '烤三文鱼 (Grillad lax)'. NO exceptions. Do NOT put Swedish/English first.\n"
+        "2. Closed restaurants and unreachable restaurants should ALL be grouped together at the end in a section titled "
+        "'📋 餐厅关闭或信息不可用', using this format:\n"
+        "   关闭: XXX餐厅 (从 X月X日 到 Y月Y日)\n"
+        "   信息不可用: YYY餐厅 (Response code: ZZZ)\n"
+    )
+
     models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3-flash-preview"]
     for model in models:
         try:
             response = client.models.generate_content(model=model, contents=prompt)
             print(f"Used model: {model}")
-            # Token usage logging
+
+            # Token usage
+            usage_str = ""
             if response.usage_metadata:
                 um = response.usage_metadata
-                usage_str = (
-                    f"\n--- Token Usage ---\n"
-                    f"  Input: {um.prompt_token_count} | Output: {um.candidates_token_count} | Total: {um.total_token_count}"
-                )
-                if hasattr(um, 'thoughts_token_count') and um.thoughts_token_count:
-                    usage_str += f" | Thinking: {um.thoughts_token_count}"
+                input_t = um.prompt_token_count or 0
+                output_t = um.candidates_token_count or 0
+                thinking_t = getattr(um, 'thoughts_token_count', 0) or 0
+                data = update_token_usage(input_t, output_t, thinking_t)
+                usage_str = "\n" + format_token_usage(um, data)
                 print(usage_str)
                 if DEBUG:
                     print(f"  [DEBUG] Full usage_metadata: {um}")
-            else:
-                usage_str = ""
             return response.text, usage_str
         except Exception as e:
             print(f"Model {model} failed: {e}")
     raise RuntimeError("All models failed")
 
+
+# --- Webhook ---
 
 def send_webhook(text):
     if DEBUG:
@@ -132,6 +224,8 @@ def send_webhook(text):
         requests.post(WEBHOOK_URL, json={"content": text[i:i+2000]}, timeout=10)
 
 
+# --- Main ---
+
 def main():
     today = datetime.date.today()
     if today.month == 7:
@@ -142,9 +236,15 @@ def main():
         print(f"Today is {holiday} - skipping")
         return
     print(f"Fetching lunch menus for Kista - {today.strftime('%A %Y-%m-%d')}\n")
-    menus = [fetch_menu(url) for url in RESTAURANTS]
-    combined = "\n\n".join(menus)
-    summary, usage_str = summarize(combined)
+
+    fetched_results = [fetch_menu(url) for url in RESTAURANTS]
+
+    if DEBUG:
+        ok_count = sum(1 for r in fetched_results if r["status"] == "ok")
+        err_count = sum(1 for r in fetched_results if r["status"] == "error")
+        print(f"Fetched: {ok_count} ok, {err_count} failed\n")
+
+    summary, usage_str = summarize(fetched_results)
     print(summary)
     send_webhook(summary + usage_str)
 
