@@ -78,7 +78,20 @@ def load_token_usage():
             "debug": {"history": [], "total_input": 0, "total_output": 0, "total_thinking": 0},
         }
     with open(TOKEN_USAGE_FILE, "r") as f:
-        return json.load(f)
+        data = json.load(f)
+    # Migrate old format if needed
+    if "scheduled" not in data:
+        old_history = data.get("history", [])
+        old_total = {
+            "total_input": data.get("total_input", 0),
+            "total_output": data.get("total_output", 0),
+            "total_thinking": data.get("total_thinking", 0),
+        }
+        data = {
+            "scheduled": {"history": old_history, **old_total},
+            "debug": {"history": [], "total_input": 0, "total_output": 0, "total_thinking": 0},
+        }
+    return data
 
 
 def save_token_usage(data):
@@ -205,24 +218,26 @@ def summarize(fetched_results):
         tried_models.append(model)
         try:
             response = client.models.generate_content(model=model, contents=prompt)
-            model_path = " → ".join(tried_models) + (" (fallback)" if len(tried_models) > 1 else "")
-            print(f"Used model: {model_path}")
-
-            # Token usage
-            usage_str = ""
-            if response.usage_metadata:
-                um = response.usage_metadata
-                input_t = um.prompt_token_count or 0
-                output_t = um.candidates_token_count or 0
-                thinking_t = getattr(um, 'thoughts_token_count', 0) or 0
-                data = update_token_usage(input_t, output_t, thinking_t)
-                usage_str = "\n" + format_token_usage(um, data, model_path)
-                print(usage_str)
-                if DEBUG:
-                    print(f"  [DEBUG] Full usage_metadata: {um}")
-            return response.text, usage_str
         except Exception as e:
             print(f"Model {model} failed: {e}")
+            continue
+
+        model_path = " → ".join(tried_models) + (" (fallback)" if len(tried_models) > 1 else "")
+        print(f"Used model: {model_path}")
+
+        # Token usage
+        usage_str = ""
+        if response.usage_metadata:
+            um = response.usage_metadata
+            input_t = um.prompt_token_count or 0
+            output_t = um.candidates_token_count or 0
+            thinking_t = getattr(um, 'thoughts_token_count', 0) or 0
+            data = update_token_usage(input_t, output_t, thinking_t)
+            usage_str = "\n" + format_token_usage(um, data, model_path)
+            print(usage_str)
+            if DEBUG:
+                print(f"  [DEBUG] Full usage_metadata: {um}")
+        return response.text, usage_str
     raise RuntimeError("All models failed")
 
 
