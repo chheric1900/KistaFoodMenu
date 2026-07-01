@@ -40,3 +40,16 @@ jobs:
           git add token_usage.json 2>/dev/null || true
           git diff --cached --quiet || git commit -m "Update token usage $(date +%Y-%m-%d)"
           git push
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL_FOR_KISTA_FOOD_MENU }}
+        run: |
+          if [ -f .failure_notified ]; then
+            echo "Already notified by script."
+          elif [ -n "$WEBHOOK_URL" ]; then
+            curl -s -H "Content-Type: application/json" \
+              -d '{"content": "⚠️ Kista Lunch Menu workflow failed outside the main script (setup/install/commit step). Check the Actions log."}' \
+              "$WEBHOOK_URL"
+          fi

@@ -19,6 +19,27 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 USER_AGENT = "Mozilla/5.0"
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 TOKEN_USAGE_FILE = os.path.join(os.path.dirname(__file__), "token_usage.json")
+FAILURE_SENTINEL = os.path.join(os.path.dirname(__file__), ".failure_notified")
+PROJECT_NAME = "Kista Lunch Menu"
+
+
+def notify_failure(msg):
+    """Post a failure alert to the webhook and write a sentinel so the
+    CI workflow does not double-notify. Portable across any runner."""
+    print(msg)
+    try:
+        with open(FAILURE_SENTINEL, "w") as f:
+            f.write(msg)
+    except Exception:
+        pass
+    if DEBUG:
+        print("[DEBUG] Skipping failure webhook")
+        return
+    if WEBHOOK_URL:
+        try:
+            requests.post(WEBHOOK_URL, json={"content": msg[:2000]}, timeout=10)
+        except Exception as e:
+            print(f"Failed to send failure webhook: {e}")
 
 
 def easter(year):
@@ -279,4 +300,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Clean any stale sentinel from a previous run (relevant on persistent servers)
+    if os.path.exists(FAILURE_SENTINEL):
+        os.remove(FAILURE_SENTINEL)
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        notify_failure(f"⚠️ {PROJECT_NAME} failed: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        raise SystemExit(1)
