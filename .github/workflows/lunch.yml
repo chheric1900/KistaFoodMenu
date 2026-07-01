@@ -9,9 +9,17 @@ on:
         description: 'Debug mode (skip webhook, log only)'
         type: boolean
         default: false
+      dry_run:
+        description: 'Dry run (fetch only, skip AI + webhook)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+
+concurrency:
+  group: kista-lunch-menu
+  cancel-in-progress: false
 
 jobs:
   fetch-and-summarize:
@@ -31,6 +39,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_PROJECT_KISTA_FOOD_MENU_FREE_TIER_API_KEY }}
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL_FOR_KISTA_FOOD_MENU }}
           DEBUG: ${{ inputs.debug && '1' || '0' }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
         run: python fetch_menus.py
 
       - name: Commit token usage

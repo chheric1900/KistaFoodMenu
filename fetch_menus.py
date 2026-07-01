@@ -1,9 +1,22 @@
 import requests
 from bs4 import BeautifulSoup
-from google import genai
 import datetime
 import json
 import os
+import sys
+import time
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+log = logging.getLogger("kista_lunch")
+
+# Transient error markers that warrant a retry on the same model
+TRANSIENT_MARKERS = ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "deadline", "timeout", "Timeout", "500", "internal")
+
+
+def is_transient(err):
+    s = str(err)
+    return any(m in s for m in TRANSIENT_MARKERS)
 
 RESTAURANTS = [
     "https://ericssonbynordrest.se/restaurang/the-courtyard/#lunch-menu",
@@ -18,6 +31,7 @@ RESTAURANTS = [
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 USER_AGENT = "Mozilla/5.0"
 DEBUG = os.environ.get("DEBUG", "0") == "1"
+DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or "--dry-run" in sys.argv
 TOKEN_USAGE_FILE = os.path.join(os.path.dirname(__file__), "token_usage.json")
 FAILURE_SENTINEL = os.path.join(os.path.dirname(__file__), ".failure_notified")
 PROJECT_NAME = "Kista Lunch Menu"
@@ -26,20 +40,20 @@ PROJECT_NAME = "Kista Lunch Menu"
 def notify_failure(msg):
     """Post a failure alert to the webhook and write a sentinel so the
     CI workflow does not double-notify. Portable across any runner."""
-    print(msg)
+    log.info(msg)
     try:
         with open(FAILURE_SENTINEL, "w") as f:
             f.write(msg)
     except Exception:
         pass
     if DEBUG:
-        print("[DEBUG] Skipping failure webhook")
+        log.info("[DEBUG] Skipping failure webhook")
         return
     if WEBHOOK_URL:
         try:
             requests.post(WEBHOOK_URL, json={"content": msg[:2000]}, timeout=10)
         except Exception as e:
-            print(f"Failed to send failure webhook: {e}")
+            log.info(f"Failed to send failure webhook: {e}")
 
 
 def easter(year):
@@ -84,9 +98,9 @@ def is_swedish_holiday(d):
     kristi = e + datetime.timedelta(days=39)
     holidays[kristi + datetime.timedelta(days=1)] = "Klämdag (after Kristi himmelsfärdsdag)"
     if DEBUG:
-        print("Swedish holidays this year:")
+        log.info("Swedish holidays this year:")
         for date, name in sorted(holidays.items()):
-            print(f"  {date} - {name}")
+            log.info(f"  {date} - {name}")
     return holidays.get(d)
 
 
@@ -187,6 +201,7 @@ def fetch_menu(url):
 # --- AI ---
 
 def summarize(fetched_results):
+    from google import genai
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     today = datetime.date.today()
     weekday = today.strftime("%A")
@@ -229,22 +244,32 @@ def summarize(fetched_results):
     )
 
     if DEBUG:
-        print("--- [DEBUG] Full prompt to AI ---")
-        print(prompt)
-        print("--- [DEBUG] End of prompt ---\n")
+        log.info("--- [DEBUG] Full prompt to AI ---")
+        log.info(prompt)
+        log.info("--- [DEBUG] End of prompt ---\n")
 
     models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3-flash-preview"]
     tried_models = []
     for model in models:
         tried_models.append(model)
-        try:
-            response = client.models.generate_content(model=model, contents=prompt)
-        except Exception as e:
-            print(f"Model {model} failed: {e}")
+        response = None
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(model=model, contents=prompt)
+                break
+            except Exception as e:
+                if is_transient(e) and attempt < 2:
+                    wait = 2 ** attempt  # 1s, 2s
+                    log.info(f"Model {model} transient error (attempt {attempt + 1}/3): {e}. Retrying in {wait}s...")
+                    time.sleep(wait)
+                    continue
+                log.info(f"Model {model} failed: {e}")
+                break
+        if response is None:
             continue
 
         model_path = " → ".join(tried_models) + (" (fallback)" if len(tried_models) > 1 else "")
-        print(f"Used model: {model_path}")
+        log.info(f"Used model: {model_path}")
 
         # Token usage
         usage_str = ""
@@ -255,9 +280,9 @@ def summarize(fetched_results):
             thinking_t = getattr(um, 'thoughts_token_count', 0) or 0
             data = update_token_usage(input_t, output_t, thinking_t)
             usage_str = "\n" + format_token_usage(um, data, model_path)
-            print(usage_str)
+            log.info(usage_str)
             if DEBUG:
-                print(f"  [DEBUG] Full usage_metadata: {um}")
+                log.info(f"  [DEBUG] Full usage_metadata: {um}")
         return response.text, usage_str
     raise RuntimeError("All models failed")
 
@@ -266,7 +291,7 @@ def summarize(fetched_results):
 
 def send_webhook(text):
     if DEBUG:
-        print("[DEBUG] Skipping webhook")
+        log.info("[DEBUG] Skipping webhook")
         return
     if not WEBHOOK_URL:
         return
@@ -278,24 +303,33 @@ def send_webhook(text):
 
 def main():
     today = datetime.date.today()
-    if today.month == 7:
-        print("July - skipping (summer break)")
+    if not DRY_RUN and today.month == 7:
+        log.info("July - skipping (summer break)")
         return
     holiday = is_swedish_holiday(today)
-    if holiday:
-        print(f"Today is {holiday} - skipping")
+    if not DRY_RUN and holiday:
+        log.info(f"Today is {holiday} - skipping")
         return
-    print(f"Fetching lunch menus for Kista - {today.strftime('%A %Y-%m-%d')}\n")
+    log.info(f"Fetching lunch menus for Kista - {today.strftime('%A %Y-%m-%d')}\n")
 
     fetched_results = [fetch_menu(url) for url in RESTAURANTS]
 
-    if DEBUG:
+    if DEBUG or DRY_RUN:
         ok_count = sum(1 for r in fetched_results if r["status"] == "ok")
         err_count = sum(1 for r in fetched_results if r["status"] == "error")
-        print(f"Fetched: {ok_count} ok, {err_count} failed\n")
+        log.info(f"Fetched: {ok_count} ok, {err_count} failed\n")
+
+    if DRY_RUN:
+        log.info("[DRY RUN] Fetched content (AI + webhook skipped):")
+        for r in fetched_results:
+            if r["status"] == "ok":
+                log.info(f"\n=== {r['url']} ===\n{r['content'][:500]}")
+            else:
+                log.info(f"\n=== {r['url']} === [FAILED: {r['code']}]")
+        return
 
     summary, usage_str = summarize(fetched_results)
-    print(summary)
+    log.info(summary)
     send_webhook(summary + usage_str)
 
 
